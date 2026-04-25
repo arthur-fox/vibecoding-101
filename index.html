@@ -8,8 +8,27 @@
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
+    @property --bg-angle {
+      syntax: '<angle>';
+      initial-value: 0deg;
+      inherits: false;
+    }
+
+    @keyframes spin-bg {
+      to { --bg-angle: 360deg; }
+    }
+
     body {
-      background: #0a0a0f;
+      background: conic-gradient(
+        from var(--bg-angle) at 50% 50%,
+        #04041a,
+        #0d0521,
+        #050e1f,
+        #041a18,
+        #0a0520,
+        #04041a
+      );
+      animation: spin-bg 24s linear infinite;
       display: flex;
       flex-direction: column;
       align-items: center;
