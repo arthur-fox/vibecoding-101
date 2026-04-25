@@ -138,8 +138,11 @@
     const CELL = canvas.width / COLS;
     const TICK_BASE = 150;
     const TICK_MIN = 60;
+    const POWER_UP_BOOST = 40;
+    const POWER_UP_DURATION = 3000;
 
     let snake, dir, nextDir, food, score, best, state, tickInterval, tick;
+    let powerUp, boosted, boostTimeout, foodCount, nextPowerUpAt;
 
     function lsGet(k, fb) { try { return localStorage.getItem(k) ?? fb; } catch { return fb; } }
     function lsSet(k, v) { try { localStorage.setItem(k, v); } catch {} }
@@ -169,11 +172,45 @@
       score = 0;
       scoreEl.textContent = 0;
       food = spawnFood(snake);
+      powerUp = null;
+      boosted = false;
+      if (boostTimeout) { clearTimeout(boostTimeout); boostTimeout = null; }
+      foodCount = 0;
+      nextPowerUpAt = 3 + rand(3);
       tick = 0;
     }
 
     function tickSpeed() {
       return Math.max(TICK_MIN, TICK_BASE - Math.floor(score / 5) * 8);
+    }
+
+    function boostedTickSpeed() {
+      return Math.max(40, tickSpeed() - POWER_UP_BOOST);
+    }
+
+    function activateBoost() {
+      boosted = true;
+      if (boostTimeout) clearTimeout(boostTimeout);
+      clearInterval(tickInterval);
+      tickInterval = setInterval(gameLoop, boostedTickSpeed());
+      boostTimeout = setTimeout(() => {
+        boosted = false;
+        boostTimeout = null;
+        clearInterval(tickInterval);
+        tickInterval = setInterval(gameLoop, tickSpeed());
+      }, POWER_UP_DURATION);
+    }
+
+    function spawnPowerUp(body) {
+      foodCount++;
+      if (foodCount < nextPowerUpAt || powerUp) return;
+      foodCount = 0;
+      nextPowerUpAt = 3 + rand(3);
+      let pos;
+      do {
+        pos = { x: rand(COLS), y: rand(ROWS) };
+      } while (body.some(s => s.x === pos.x && s.y === pos.y) || (pos.x === food.x && pos.y === food.y));
+      powerUp = pos;
     }
 
     function step() {
@@ -191,6 +228,8 @@
 
       snake.unshift(head);
 
+      let ate = false;
+
       if (head.x === food.x && head.y === food.y) {
         score++;
         scoreEl.textContent = score;
@@ -200,11 +239,26 @@
           lsSet('snake-best', best);
         }
         food = spawnFood(snake);
-        clearInterval(tickInterval);
-        tickInterval = setInterval(gameLoop, tickSpeed());
-      } else {
-        snake.pop();
+        if (!boosted) {
+          clearInterval(tickInterval);
+          tickInterval = setInterval(gameLoop, tickSpeed());
+        }
+        spawnPowerUp(snake);
+        ate = true;
+      } else if (powerUp && head.x === powerUp.x && head.y === powerUp.y) {
+        score += 3;
+        scoreEl.textContent = score;
+        if (score > best) {
+          best = score;
+          bestEl.textContent = best;
+          lsSet('snake-best', best);
+        }
+        powerUp = null;
+        activateBoost();
+        ate = true;
       }
+
+      if (!ate) snake.pop();
 
       tick++;
       draw();
@@ -285,6 +339,7 @@
 
       drawGrid();
       drawFood();
+      drawPowerUp();
       drawSnake();
     }
 
@@ -332,6 +387,36 @@
       ctx.fill();
     }
 
+    function drawPowerUp() {
+      if (!powerUp) return;
+      const x = powerUp.x * CELL + CELL / 2;
+      const y = powerUp.y * CELL + CELL / 2;
+      const r = CELL * 0.35;
+      const pulse = 1 + 0.15 * Math.sin(tick * 0.3);
+
+      const grd = ctx.createRadialGradient(x, y, 0, x, y, r * 2.5);
+      grd.addColorStop(0, '#fbbf24cc');
+      grd.addColorStop(1, 'transparent');
+      ctx.fillStyle = grd;
+      ctx.beginPath();
+      ctx.arc(x, y, r * 2.5, 0, Math.PI * 2);
+      ctx.fill();
+
+      const s = r * pulse;
+      ctx.fillStyle = '#fbbf24';
+      ctx.shadowColor = '#fbbf2488';
+      ctx.shadowBlur = 14;
+      ctx.beginPath();
+      ctx.moveTo(x, y - s);
+      ctx.lineTo(x + s, y);
+      ctx.lineTo(x, y + s);
+      ctx.lineTo(x - s, y);
+      ctx.closePath();
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.shadowColor = 'transparent';
+    }
+
     function drawSnake(dead = false) {
       snake.forEach((seg, i) => {
         const t = i / snake.length;
@@ -344,15 +429,22 @@
         const h = CELL - 2;
         const radius = 4;
 
-        if (isHead) {
-          ctx.fillStyle = dead ? '#666' : '#60a5fa';
-          ctx.shadowColor = dead ? 'transparent' : '#60a5fa88';
+        if (dead) {
+          ctx.fillStyle = isHead ? '#666' : `rgba(80,80,80,${0.9 - t * 0.5})`;
+          ctx.shadowColor = 'transparent';
+          ctx.shadowBlur = 0;
+        } else if (boosted) {
+          const hue = (tick * 8 + i * (360 / Math.max(snake.length, 1))) % 360;
+          ctx.fillStyle = `hsl(${hue},100%,60%)`;
+          ctx.shadowColor = `hsl(${hue},100%,60%)`;
+          ctx.shadowBlur = isHead ? 14 : 6;
+        } else if (isHead) {
+          ctx.fillStyle = '#60a5fa';
+          ctx.shadowColor = '#60a5fa88';
           ctx.shadowBlur = 12;
         } else {
-          const blue = dead ? 80 : Math.round(200 - t * 60);
-          ctx.fillStyle = dead
-            ? `rgba(80,80,80,${0.9 - t * 0.5})`
-            : `rgba(50,100,${blue},${0.95 - t * 0.3})`;
+          const blue = Math.round(200 - t * 60);
+          ctx.fillStyle = `rgba(50,100,${blue},${0.95 - t * 0.3})`;
           ctx.shadowBlur = 0;
           ctx.shadowColor = 'transparent';
         }
@@ -368,6 +460,7 @@
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       drawGrid();
       drawFood();
+      drawPowerUp();
       drawSnake(true);
     }
 
